@@ -1,5 +1,5 @@
-﻿using Newtonsoft.Json;
-using System.Configuration;
+﻿using System.Configuration;
+using System.Text.Json;
 
 namespace KebabGGbab.Configurator
 {
@@ -35,7 +35,7 @@ namespace KebabGGbab.Configurator
         /// <returns>Объект Dictionary, содержащий в себе данные секции appSettings. Key и Value каждого элемента возвращаемой коллекции представляют собой свойства key и value одной из секций add соответственно.</returns>
         public static Dictionary<string, string> LoadConfiguration(string path, bool changeUsingConfig = false)
         {
-            string nameConfig = GetFileName(path);
+            string nameConfig = Path.GetFileNameWithoutExtension(path);
             KeyValueConfigurationCollection settings = ConfigurationManager.OpenMappedExeConfiguration(new() { ExeConfigFilename = path }, ConfigurationUserLevel.None).AppSettings.Settings;
             Dictionary<string, string> settingsDictionary = [];
             foreach (KeyValueConfigurationElement element in settings)
@@ -53,7 +53,7 @@ namespace KebabGGbab.Configurator
         /// <param name="changeUsingConfig">Изменить ли текущую конфигурацию? По умолчанию false</param>
         public static void SaveConfiguration(Dictionary<string, string> keyValues, string path, bool changeUsingConfig = false)
         {
-            string configName = GetFileName(path);
+            string configName = Path.GetFileNameWithoutExtension(path);
             if (Configurations == null)
                 throw new NullReferenceException();
             if (!Configurations.GetConfigsName().Contains(configName))
@@ -77,13 +77,17 @@ namespace KebabGGbab.Configurator
         /// Удалить файл конфигурации с расширением .config 
         /// </summary>
         /// <param name="path">Путь к файлу конфигурации</param>
-        public static void DeleteConfiguration(string path)
+        public static void DeleteConfiguration(string path, bool changeUsingConfig = false)
         {
-            string configName = GetFileName(path);
             if (File.Exists(path))
-                File.Delete(path);
-            Configurations.Remove(path);
-            RefreshUsingConfig("Default");
+            { 
+             File.Delete(path);
+            }
+            Configurations?.Remove(path);
+            if (changeUsingConfig)
+            {
+                RefreshUsingConfig("Default");
+            }
         }
 
         /// <summary>
@@ -112,21 +116,6 @@ namespace KebabGGbab.Configurator
             if (settings["UsingConfig"] == null)
                 settings.Add("UsingConfig", "");
         }
-        private static string GetFileName(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-                throw new ConfiguratorException.EmptyOrNullPathException();
-            int lastSlashIndex = path.LastIndexOf('\\');
-            if (lastSlashIndex != -1)
-            {
-                string nameConfig = path.Substring(lastSlashIndex + 1);
-                int lastDotIndex = nameConfig.LastIndexOf('.');
-                if (lastDotIndex != -1)
-                    return nameConfig.Substring(0, lastDotIndex);
-
-            }
-            throw new ConfiguratorException.WrongPathException();
-        }
 
         /// <summary>
         /// Загрузить файл с расширением JSON
@@ -136,21 +125,50 @@ namespace KebabGGbab.Configurator
         /// <returns>Десериализованный объект, либо default значение для типа, если файл по указанному пути не существует, либо он пуст или произошла какая-либо ошибка </returns>
         public static T? LoadJSONConfiguration<T>(string path)
         {
-            try
+            string content = ReadFileContent(path);
+            if (string.IsNullOrEmpty(content))
             {
-                if (File.Exists(path))
-                {
-                    string seriliaze = File.ReadAllText(path);
-                    if (string.IsNullOrEmpty(seriliaze))
-                        return default;
-                    return JsonConvert.DeserializeObject<T>(seriliaze);
-                }
                 return default;
             }
-            catch
+            try
+            {
+                return JsonSerializer.Deserialize<T>(content);
+            }
+            catch (JsonException ex)
             {
                 return default;
             }
         }
-    }
+
+        public static void SaveJSONConfiguration<T>(string path, T obj)
+        {
+            SaveJSONConfiguration(path, obj, FileMode.OpenOrCreate);
+        }
+
+        public static void SaveJSONConfiguration<T>(string path, T obj, FileMode fileMode)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                throw new ArgumentNullException(nameof(path), "Путь к файлу не может быть пустым.");
+            }
+            if (fileMode == FileMode.Create)
+            {
+                if (File.Exists(path))
+                {
+                    throw new IOException($"Файл '{path}' уже существует.");
+                }
+            }
+            using StreamWriter writer = new(File.Open(path, fileMode));
+            writer.Write(JsonSerializer.Serialize(obj));
+        }
+
+        private static string ReadFileContent(string path)
+        {
+            if (File.Exists(path))
+            {
+                return File.ReadAllText(path);
+            }
+            return string.Empty;
+        }
+     }
 }

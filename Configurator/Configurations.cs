@@ -2,32 +2,49 @@
 {
     public class Configurations
     {
-        private List<string> ConfigsName = [];
-        private List<string> FullPathConfigs = [];
-        internal Configurations(string path) 
+        /// <summary>
+        /// Содержит имена файлов .config без расширения
+        /// </summary>
+        private readonly List<string> ConfigsName = [];
+        /// <summary>
+        /// Содержит полный путь к файлам .config
+        /// </summary>
+        private readonly List<string> FullPathConfigs = [];
+        public string PathRootConfig { get; private set; }
+
+        public Configurations(string path) 
         {
-            Directory.Exists(path);
-            FileInfo[] userConfigs = new DirectoryInfo(path).GetFiles();
-            foreach (FileInfo config in userConfigs)
+            ArgumentException.ThrowIfNullOrEmpty(path);
+            if (Directory.Exists(path))
             {
-                string configName = config.Name;
-                if (configName.Contains(".config"))
+                PathRootConfig = path;
+                FileInfo[] userConfigs = new DirectoryInfo(path).GetFiles();
+                foreach (FileInfo config in userConfigs)
                 {
-                    ConfigsName.Add(configName.Remove(configName.Length - 7));
-                    FullPathConfigs.Add(config.FullName);
+                    if (config.Extension == ".config")
+                    {
+                        ConfigsName.Add(Path.GetFileNameWithoutExtension(config.Name));
+                        FullPathConfigs.Add(config.FullName);
+                    }
                 }
             }
+            else
+            {
+                throw new DirectoryNotFoundException($"Каталог '{path}' не найден.");
+            }
         }
-        internal List<string> GetConfigsName()
+        public List<string> GetConfigsName()
         {
             return ConfigsName;
         }
-        internal List<string> GetFullPathConfigs()
+        public List<string> GetFullPathConfigs()
         {
             return FullPathConfigs;
         }
-        internal void Add(string path)
+        public void Add(string path)
         {
+            if (path == null)
+                return;
             if (!FullPathConfigs.Contains(path))
             {
                 FileInfo fileInfo = new(path);
@@ -39,11 +56,27 @@
                 }
             }
         }
-
-        internal void Remove(string path)
+        public void Add(IEnumerable<string> paths)
         {
+            foreach (string path in paths)
+            {
+                Add(path);
+            }
+        }
+
+        public void Remove(string path)
+        {
+            if (path == null)
+                return;
             FullPathConfigs.Remove(path);
-            ConfigsName.Remove(path.Substring(path.LastIndexOf('/') + 1).Substring(0, path.LastIndexOf('.')));
+            ConfigsName.Remove(Path.GetFileNameWithoutExtension(path));
+        }
+        public void Remove(IEnumerable<string> paths)
+        {
+            foreach(string path in paths)
+            {
+                Remove(path);
+            }
         }
     }
 }
