@@ -5,19 +5,19 @@
         /// <summary>
         /// Содержит имена файлов .config без расширения
         /// </summary>
-        private readonly List<string> ConfigsName = [];
+        private List<string> ConfigsName = [];
         /// <summary>
         /// Содержит полный путь к файлам .config
         /// </summary>
-        private readonly List<string> FullPathConfigs = [];
-        public string PathRootConfig { get; private set; }
+        private List<string> FullPathConfigs = [];
+        public string RootPathConfigs { get; private set; }
 
         public Configurations(string path) 
         {
             ArgumentException.ThrowIfNullOrEmpty(path);
             if (Directory.Exists(path))
             {
-                PathRootConfig = path;
+                RootPathConfigs = path;
                 FileInfo[] userConfigs = new DirectoryInfo(path).GetFiles();
                 foreach (FileInfo config in userConfigs)
                 {
@@ -41,6 +41,10 @@
         {
             return FullPathConfigs;
         }
+        public string GetRootPathConfigs()
+        {
+            return RootPathConfigs;
+        }
         public void Add(string path)
         {
             if (path == null)
@@ -63,7 +67,6 @@
                 Add(path);
             }
         }
-
         public void Remove(string path)
         {
             if (path == null)

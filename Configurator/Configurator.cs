@@ -6,10 +6,16 @@ namespace KebabGGbab.Configurator
 {
     public static class Configurator
     {
+        static Configurator()
+        {
+            UsingConfig = LoadKeyValueFromAppConfig("UsingConfig");
+
+        }
         /// <summary>
         /// Список имён всех конфигураций по определённому пути, не включая расширение.
         /// </summary>
-        private static Configurations? Configurations { get; set; }
+        private static Configurations? Configurations { get; set; } = null;
+        public static string? UsingConfig {  get; private set; } 
 
         /// <summary>
         /// Инициализировать новый объект, содержащий информацию о конфигурациях
@@ -34,16 +40,23 @@ namespace KebabGGbab.Configurator
         /// <param name="path">Путь к файлу конфигурации</param>
         /// <param name="changeUsingConfig">Изменить ли текущую конфигурацию? По умолчанию false</param>
         /// <returns>Объект Dictionary, содержащий в себе данные секции appSettings. Key и Value каждого элемента возвращаемой коллекции представляют собой свойства key и value одной из секций add соответственно.</returns>
-        public static Dictionary<string, string> LoadConfiguration(string path, bool changeUsingConfig = false)
+        public static Dictionary<string, string>? LoadConfiguration(string path, bool changeUsingConfig = false)
         {
-            string nameConfig = Path.GetFileNameWithoutExtension(path);
-            KeyValueConfigurationCollection settings = ConfigurationManager.OpenMappedExeConfiguration(new() { ExeConfigFilename = path }, ConfigurationUserLevel.None).AppSettings.Settings;
-            Dictionary<string, string> settingsDictionary = [];
-            foreach (KeyValueConfigurationElement element in settings)
-                settingsDictionary.Add(element.Key, element.Value);
-            if (changeUsingConfig)
-                RefreshUsingConfig(nameConfig);
-            return settingsDictionary;
+            if (File.Exists(path) && new FileInfo(path).Extension == ".config")
+            {
+                KeyValueConfigurationCollection settings = ConfigurationManager.OpenMappedExeConfiguration(new() { ExeConfigFilename = path }, ConfigurationUserLevel.None).AppSettings.Settings;
+                Dictionary<string, string> settingsDictionary = [];
+                foreach (KeyValueConfigurationElement element in settings)
+                {
+                    settingsDictionary.Add(element.Key, element.Value);
+                }
+                if (changeUsingConfig)
+                {
+                    RefreshValueKeyInAppConfig("UsingConfig", Path.GetFileNameWithoutExtension(path));
+                }
+                return settingsDictionary;
+            }
+            return null;
         }
 
         /// <summary>
@@ -54,24 +67,34 @@ namespace KebabGGbab.Configurator
         /// <param name="changeUsingConfig">Изменить ли текущую конфигурацию? По умолчанию false</param>
         public static void SaveConfiguration(Dictionary<string, string> keyValues, string path, bool changeUsingConfig = false)
         {
-            string configName = Path.GetFileNameWithoutExtension(path);
-            if (Configurations == null)
-                throw new NullReferenceException();
-            if (!Configurations.GetConfigsName().Contains(configName))
+            if (!string.IsNullOrEmpty(path) && new FileInfo(path).Extension == ".config")
             {
-                File.Copy($"{path.Substring(0, path.LastIndexOf('\\'))}Default.config", path);
+                throw new ArgumentException($"Файл, путь которого {path} содержит ошибку: ожидается расширение '.config'");
+            }
+            string configName = Path.GetFileNameWithoutExtension(path);
+            if (Configurations != null && !Configurations.GetConfigsName().Contains(configName) == false)
+            {
+                File.Copy($"{path[..path.LastIndexOf('\\')]}Default.config", path);
                 Configurations.Add(path);
             }
             Configuration configuration = ConfigurationManager.OpenMappedExeConfiguration(new() { ExeConfigFilename = path }, ConfigurationUserLevel.None);
             KeyValueConfigurationCollection settings = configuration.AppSettings.Settings;
             foreach (KeyValueConfigurationElement element in settings)
+            {
                 foreach (KeyValuePair<string, string> keyValuePair in keyValues)
+                {
                     if (element.Key == keyValuePair.Key)
+                    {
                         element.Value = keyValuePair.Value;
+                    }
+                }
+            }
             configuration.Save(ConfigurationSaveMode.Modified);
             ConfigurationManager.RefreshSection(configuration.AppSettings.SectionInformation.Name);
             if (changeUsingConfig)
-                RefreshUsingConfig(configName);
+            {
+                RefreshValueKeyInAppConfig("UsingConfig", configName);
+            }
         }
 
         /// <summary>
@@ -80,42 +103,72 @@ namespace KebabGGbab.Configurator
         /// <param name="path">Путь к файлу конфигурации</param>
         public static void DeleteConfiguration(string path, bool changeUsingConfig = false)
         {
+
+            if (string.IsNullOrEmpty(path) && !(new FileInfo(path).Extension == ".config"))
+            {
+                throw new ArgumentException($"Файл, путь которого {path} содержит ошибку: ожидается расширение '.config'");
+            }
             if (File.Exists(path))
             { 
-             File.Delete(path);
+                File.Delete(path);
             }
             Configurations?.Remove(path);
             if (changeUsingConfig)
             {
-                RefreshUsingConfig("Default");
+                RefreshValueKeyInAppConfig("UsingConfig","Default");
             }
         }
 
         /// <summary>
-        /// Загрузить имя текущей конфигурации
+        /// Загрузить значение определённого ключа из конфигурации приложения
         /// </summary>
-        /// <returns></returns>
-        public static string LoadUsingConfig()
+        /// <returns>Значения ключа</returns>
+        public static string? LoadKeyValueFromAppConfig(string key)
         {
             KeyValueConfigurationCollection settings = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).AppSettings.Settings;
-            ExistsUsingConfigKey(settings);
-            return settings["UsingConfig"].Value;
+            if (ExistsKey(settings, key))
+            {
+                return settings[key].Value;
+            }
+            return null;
         }
 
-        private static void RefreshUsingConfig(string configName)
+        public static void RefreshValueKeyInAppConfig(string key, string value)
         {
             Configuration config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
             KeyValueConfigurationCollection settings = config.AppSettings.Settings;
-            ExistsUsingConfigKey(settings);
-            settings["UsingConfig"].Value = configName;
+            SetValueToKey(settings, key, value);
             config.Save(ConfigurationSaveMode.Modified);
             ConfigurationManager.RefreshSection(config.AppSettings.SectionInformation.Name);
         }
-
-        private static void ExistsUsingConfigKey(KeyValueConfigurationCollection settings)
+        public static void AddKey(KeyValueConfigurationCollection settings, string key)
         {
-            if (settings["UsingConfig"] == null)
-                settings.Add("UsingConfig", "");
+            if (!ExistsKey(settings, key))
+                settings.Add(key, "");
+        }
+
+        public static bool ExistsKey(KeyValueConfigurationCollection settings, string key)
+        {
+            if (settings[key] == null)
+                return false;
+            else
+                return true;
+        }
+        /// <summary>
+        /// Присваивает значение ключу
+        /// </summary>
+        /// <param name="settings">Коллекция элементов из секции settings</param>
+        /// <param name="key">Ключ, которому нужно присвоить значение</param>
+        /// <param name="value">Значение, которое нужно присвоить ключу</param>
+        public static void SetValueToKey(KeyValueConfigurationCollection settings, string key, string value)
+        {
+            if (ExistsKey(settings, key))
+                settings[key].Value = value;
+            else
+            {
+                AddKey(settings, key);
+                SetValueToKey(settings, key, value);
+            }
         }
 
         /// <summary>
@@ -135,7 +188,7 @@ namespace KebabGGbab.Configurator
             {
                 return JsonSerializer.Deserialize<T>(content);
             }
-            catch (JsonException ex)
+            catch
             {
                 return default;
             }
@@ -190,7 +243,7 @@ namespace KebabGGbab.Configurator
         /// </summary>
         /// <param name="path">Путь к файлу, который необходимо прочитать</param>
         /// <returns>Содержимое файла или пустую строку, если файл не найден</returns>
-        private static string? ReadFileContent(string path)
+        public static string? ReadFileContent(string path)
         {
             if (File.Exists(path))
             {
