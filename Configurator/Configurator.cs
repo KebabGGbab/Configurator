@@ -4,59 +4,75 @@ using System.Text.Json;
 
 namespace KebabGGbab.Configurator
 {
-    public static class Configurator
+    public class Configurator
     {
-        static Configurator()
-        {
-            UsingConfig = LoadKeyValueFromAppConfig("UsingConfig");
-
-        }
         /// <summary>
         /// Список имён всех конфигураций по определённому пути, не включая расширение.
         /// </summary>
-        private static Configurations? Configurations { get; set; } = null;
-        public static string? UsingConfig {  get; private set; } 
+        public ConfigsCollection ConfigsCollection { get; private set; }
+        public string UsingConfig { get; private set; }
 
-        /// <summary>
-        /// Инициализировать новый объект, содержащий информацию о конфигурациях
-        /// </summary>
-        /// <param name="path">Путь для поиска конфигураций</param>
-        public static void SetConfigurations(string path)
+        public Configurator(string path)
         {
-            Configurations = new Configurations(path);
-        }
-        public static List<string>? GetConfigsName()
-        {
-            return Configurations?.GetConfigsName();
-        }
-        public static List<string>? GetFullPathConfigs()
-        {
-            return Configurations?.GetFullPathConfigs();
-        }
-
-        /// <summary>
-        /// Загружает файл конфигурации с расширением .config
-        /// </summary>
-        /// <param name="path">Путь к файлу конфигурации</param>
-        /// <param name="changeUsingConfig">Изменить ли текущую конфигурацию? По умолчанию false</param>
-        /// <returns>Объект Dictionary, содержащий в себе данные секции appSettings. Key и Value каждого элемента возвращаемой коллекции представляют собой свойства key и value одной из секций add соответственно.</returns>
-        public static Dictionary<string, string>? LoadConfiguration(string path, bool changeUsingConfig = false)
-        {
-            if (File.Exists(path) && new FileInfo(path).Extension == ".config")
+            ConfigsCollection = new(path);
+            KeyValueConfigurationCollection settings = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).AppSettings.Settings;
+            if (ExistsKey(settings, "UsingConfig"))
             {
-                KeyValueConfigurationCollection settings = ConfigurationManager.OpenMappedExeConfiguration(new() { ExeConfigFilename = path }, ConfigurationUserLevel.None).AppSettings.Settings;
-                Dictionary<string, string> settingsDictionary = [];
-                foreach (KeyValueConfigurationElement element in settings)
-                {
-                    settingsDictionary.Add(element.Key, element.Value);
-                }
-                if (changeUsingConfig)
-                {
-                    RefreshValueKeyInAppConfig("UsingConfig", Path.GetFileNameWithoutExtension(path));
-                }
-                return settingsDictionary;
+                AddKey(settings, "UsingConfig");
             }
-            return null;
+            UsingConfig = LoadKeyValueFromAppConfig("UsingConfig");
+        }
+
+        public Dictionary<string, string>? LoadConfiguration(string name, bool ifNullLoadUsingConfig = false, bool changeUsingConfig = false)
+        {
+            Config? config = ConfigsCollection[name];
+            if (config == null)
+            {
+                if (ifNullLoadUsingConfig)
+                {
+                    return LoadConfiguration(UsingConfig, false, changeUsingConfig);
+                }
+                return null;
+            }
+            return GetSettingsDictionary(config, changeUsingConfig);
+        }
+
+        public Dictionary<string, string>? LoadConfiguration(string name, IEnumerable<string> keys, bool ifNullLoadUsingConfig = false, bool changeUsingConfig = false)
+        {
+            Config? config = ConfigsCollection[name];
+            if (config == null)
+            {
+                if (ifNullLoadUsingConfig)
+                {
+                    return LoadConfiguration(UsingConfig, keys, false, changeUsingConfig);
+                }
+                return null;
+            }
+            return GetSettingsDictionary(config, keys, changeUsingConfig);
+        }
+
+        private Dictionary<string, string> GetSettingsDictionary(Config config, bool changeUsingConfig = false)
+        {
+            KeyValueConfigurationCollection settings = config.Configuration.AppSettings.Settings;
+            Dictionary<string, string> settingsDictionary = settings.AllKeys.ToDictionary(key => key, key => settings[key].Value);
+            if (changeUsingConfig)
+            {
+                RefreshValueKeyInAppConfig("UsingConfig", config.Name);
+            }
+            return settingsDictionary;
+        }
+
+        private Dictionary<string, string> GetSettingsDictionary(Config config, IEnumerable<string> keys, bool changeUsingConfig = false)
+        {
+            KeyValueConfigurationCollection settings = config.Configuration.AppSettings.Settings;
+            Dictionary<string, string> settingsDictionary = settings.AllKeys
+                                                                    .Where(keys.Contains)
+                                                                    .ToDictionary(key => key, key => settings[key].Value);
+            if (changeUsingConfig)
+            {
+                RefreshValueKeyInAppConfig("UsingConfig", config.Name);
+            }
+            return settingsDictionary;
         }
 
         /// <summary>
@@ -65,32 +81,34 @@ namespace KebabGGbab.Configurator
         /// <param name="keyValues">Объект Dictionary, элементы которого, содержат Key и Value для сохранения их в файл конфигурации в секцию appSettings как секции со свойствами key и value соответственно</param>
         /// <param name="path">Путь к файлу конфигурации</param>
         /// <param name="changeUsingConfig">Изменить ли текущую конфигурацию? По умолчанию false</param>
-        public static void SaveConfiguration(Dictionary<string, string> keyValues, string path, bool changeUsingConfig = false)
+        public void SaveConfiguration(Dictionary<string, string> keyValues, string path, bool changeUsingConfig = false)
         {
-            if (!string.IsNullOrEmpty(path) && new FileInfo(path).Extension == ".config")
+            if (!string.IsNullOrEmpty(path))
             {
-                throw new ArgumentException($"Файл, путь которого {path} содержит ошибку: ожидается расширение '.config'");
+                throw new ArgumentException($"Путь не может быть null или равен нулю", nameof(path));
             }
             string configName = Path.GetFileNameWithoutExtension(path);
-            if (Configurations != null && !Configurations.GetConfigsName().Contains(configName) == false)
+            Config? config = ConfigsCollection[configName];
+            if (config == null)
             {
-                File.Copy($"{path[..path.LastIndexOf('\\')]}Default.config", path);
-                Configurations.Add(path);
+                CreateConfigFile(path);
+                ConfigsCollection.Add(path);
+                config = ConfigsCollection[configName];
             }
-            Configuration configuration = ConfigurationManager.OpenMappedExeConfiguration(new() { ExeConfigFilename = path }, ConfigurationUserLevel.None);
-            KeyValueConfigurationCollection settings = configuration.AppSettings.Settings;
-            foreach (KeyValueConfigurationElement element in settings)
+            KeyValueConfigurationCollection settings = config.Configuration.AppSettings.Settings;
+            foreach (KeyValuePair<string, string> keyValuePair in keyValues)
             {
-                foreach (KeyValuePair<string, string> keyValuePair in keyValues)
+                if (ExistsKey(settings, keyValuePair.Key))
                 {
-                    if (element.Key == keyValuePair.Key)
-                    {
-                        element.Value = keyValuePair.Value;
-                    }
+                    SetValueToKey(settings, keyValuePair.Key, keyValuePair.Value);
+                }
+                else
+                {
+                    AddKey(settings, keyValuePair.Key, keyValuePair.Value);
                 }
             }
-            configuration.Save(ConfigurationSaveMode.Modified);
-            ConfigurationManager.RefreshSection(configuration.AppSettings.SectionInformation.Name);
+            config.Configuration.Save(ConfigurationSaveMode.Modified);
+            ConfigurationManager.RefreshSection(config.Configuration.AppSettings.SectionInformation.Name);
             if (changeUsingConfig)
             {
                 RefreshValueKeyInAppConfig("UsingConfig", configName);
@@ -101,21 +119,21 @@ namespace KebabGGbab.Configurator
         /// Удалить файл конфигурации с расширением .config 
         /// </summary>
         /// <param name="path">Путь к файлу конфигурации</param>
-        public static void DeleteConfiguration(string path, bool changeUsingConfig = false)
+        public void DeleteConfiguration(string name)
         {
-
-            if (string.IsNullOrEmpty(path) && !(new FileInfo(path).Extension == ".config"))
+            Config? config = ConfigsCollection[name];
+            if (config != null)
             {
-                throw new ArgumentException($"Файл, путь которого {path} содержит ошибку: ожидается расширение '.config'");
-            }
-            if (File.Exists(path))
-            { 
-                File.Delete(path);
-            }
-            Configurations?.Remove(path);
-            if (changeUsingConfig)
-            {
-                RefreshValueKeyInAppConfig("UsingConfig","Default");
+                string path = config.FileInfo.FullName;
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+                ConfigsCollection.Remove(name);
+                if (LoadKeyValueFromAppConfig("UsingConfig") == name)
+                {
+                    RefreshValueKeyInAppConfig("UsingConfig", "");
+                }
             }
         }
 
@@ -123,17 +141,17 @@ namespace KebabGGbab.Configurator
         /// Загрузить значение определённого ключа из конфигурации приложения
         /// </summary>
         /// <returns>Значения ключа</returns>
-        public static string? LoadKeyValueFromAppConfig(string key)
+        public string LoadKeyValueFromAppConfig(string key)
         {
             KeyValueConfigurationCollection settings = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None).AppSettings.Settings;
             if (ExistsKey(settings, key))
             {
                 return settings[key].Value;
             }
-            return null;
+            return String.Empty;
         }
 
-        public static void RefreshValueKeyInAppConfig(string key, string value)
+        public void RefreshValueKeyInAppConfig(string key, string value)
         {
             Configuration config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
             KeyValueConfigurationCollection settings = config.AppSettings.Settings;
@@ -141,116 +159,56 @@ namespace KebabGGbab.Configurator
             config.Save(ConfigurationSaveMode.Modified);
             ConfigurationManager.RefreshSection(config.AppSettings.SectionInformation.Name);
         }
-        public static void AddKey(KeyValueConfigurationCollection settings, string key)
+        public void AddKey(KeyValueConfigurationCollection settings, string key)
         {
             if (!ExistsKey(settings, key))
+            {
                 settings.Add(key, "");
+            }
         }
 
-        public static bool ExistsKey(KeyValueConfigurationCollection settings, string key)
+        public void AddKey(KeyValueConfigurationCollection settings, string key, string value)
         {
-            if (settings[key] == null)
-                return false;
-            else
-                return true;
+            if (!ExistsKey(settings, key))
+            {
+                settings.Add(key, value);
+            }
         }
+
+        public bool ExistsKey(KeyValueConfigurationCollection settings, string key)
+        {
+            if (settings[key] != null)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
         /// <summary>
         /// Присваивает значение ключу
         /// </summary>
         /// <param name="settings">Коллекция элементов из секции settings</param>
         /// <param name="key">Ключ, которому нужно присвоить значение</param>
         /// <param name="value">Значение, которое нужно присвоить ключу</param>
-        public static void SetValueToKey(KeyValueConfigurationCollection settings, string key, string value)
+        public void SetValueToKey(KeyValueConfigurationCollection settings, string key, string value)
         {
-            if (ExistsKey(settings, key))
-                settings[key].Value = value;
+            if (!ExistsKey(settings, key))
+            {
+                AddKey(settings, key, value);
+            }
             else
             {
-                AddKey(settings, key);
-                SetValueToKey(settings, key, value);
+                settings[key].Value = value;
             }
         }
 
-        /// <summary>
-        /// Прочитать файл с расширением и десериализовать его содержимое в объект
-        /// </summary>
-        /// <typeparam name="T">Тип объекта, в который необходимо десериализировать данные JSON-файла</typeparam>
-        /// <param name="path">Путь к JSON-файлу</param>
-        /// <returns>Десериализованный объект, либо default значение для типа, если файл по указанному пути не существует, либо он пуст или произошла какая-либо ошибка </returns>
-        public static T? LoadJSONConfiguration<T>(string path)
+        private void CreateConfigFile(string path)
         {
-            string? content = ReadFileContent(path);
-            if (string.IsNullOrEmpty(content))
-            {
-                return default;
-            }
-            try
-            {
-                return JsonSerializer.Deserialize<T>(content);
-            }
-            catch
-            {
-                return default;
-            }
-        }
-
-        /// <summary>
-        /// Сохраняет объект в файл в формате JSON в кодировке UTF-8 
-        /// </summary>
-        /// <typeparam name="T">Тип данных объекта, который будет сериализован в JSON</typeparam>
-        /// <param name="path">Путь к файлу, в который будет сохранен сериализованный объект</param>
-        /// <param name="obj">Объект, который будет сериализован и сохранен в файл</param>
-        /// <param name="fileMode">Необязательный параметр. Указывает, как операционная система должна открывать файл.</param>
-        /// <exception cref="ArgumentNullException"></exception>
-        /// <exception cref="IOException"></exception>
-        public static void SaveJSONConfiguration<T>(string path, T obj, FileMode fileMode = FileMode.OpenOrCreate)
-        {
-            SaveJSONConfiguration(path, obj, Encoding.UTF8, fileMode);
-        }
-        /// <summary>
-        /// Сохраняет объект в файл в формате JSON в указаной кодировке
-        /// </summary>
-        /// <typeparam name="T">Тип данных объекта, который будет сериализован в JSON</typeparam>
-        /// <param name="path">Путь к файлу, в который будет сохранен сериализованный объект</param>
-        /// <param name="obj">Объект, который будет сериализован и сохранен в файл</param>
-        /// <param name="encoding">Кодировка, в которой необходимо выполнить сохранение</param>
-        /// <param name="fileMode">Необязательный параметр. Указывает, как операционная система должна открывать файл.</param>
-        /// <exception cref="ArgumentNullException"></exception>
-        /// <exception cref="IOException"></exception>
-        public static void SaveJSONConfiguration<T>(string path, T obj, Encoding encoding, FileMode fileMode = FileMode.OpenOrCreate)
-        {
-            if (string.IsNullOrEmpty(path))
-            {
-                throw new ArgumentNullException(nameof(path), "Путь к файлу не может быть пустым.");
-            }
-            if (obj == null)
-            {
-                throw new ArgumentNullException(nameof(obj), "Оюъект должен быть инициализирован.");
-            }
-            if (fileMode == FileMode.Create)
-            {
-                if (File.Exists(path))
-                {
-                    throw new IOException($"Файл '{path}' уже существует.");
-                }
-            }
-            using StreamWriter writer = new(File.Open(path, fileMode), encoding);
-            writer.Write(JsonSerializer.Serialize(obj));
-        }
-
-        /// <summary>
-        /// Читает всё содержимое файла 
-        /// </summary>
-        /// <param name="path">Путь к файлу, который необходимо прочитать</param>
-        /// <returns>Содержимое файла или пустую строку, если файл не найден</returns>
-        public static string? ReadFileContent(string path)
-        {
-            if (File.Exists(path))
-            {
-                using StreamReader reader = new(File.Open(path, FileMode.Open));
-                return reader.ReadToEnd();
-            }
-            return null;
+            using var writer = new StreamWriter(File.Open(path, FileMode.Create));
+            writer.Write("<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<configuration>\r\n\t<connectionStrings>\r\n\t</connectionStrings>\r\n\t<appSettings>\r\n\t</appSettings>\r\n</configuration>");
         }
     }
 }
