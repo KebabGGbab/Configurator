@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text;
 
-namespace Configurator
+namespace KebabGGbab.Configurator
 {
     public static class ConfiguratorJSON
     {
